@@ -703,43 +703,74 @@
                 verifyPassword();
             }
         });
+        let isScreenSharing = false;
+        let currentScreenStream = null;
 
         document.getElementById('share-screen').addEventListener('click', async () => {
-            try {
-                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const screenTrack = screenStream.getVideoTracks()[0];
+            if (isScreenSharing) {
+                // Stop screen sharing
+                stopScreenShare();
+            } else {
+                // Start screen sharing
+                try {
+                    const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                    const screenTrack = screenStream.getVideoTracks()[0];
 
-                // Show local screen in the grid (just like a participant video)
-                addVideoStream(screenStream, "My Screen");
+                    currentScreenStream = screenStream;
+                    isScreenSharing = true;
 
-                // Add this screen track as a new sender to each peer connection
-                for (let peerId in peers) {
-                    peers[peerId].addTrack(screenTrack, screenStream);
-                }
+                    // Update button appearance
+                    document.getElementById('share-screen').style.background = '#9c27b0';
 
-                // When user stops screen share, remove it
-                screenTrack.onended = () => {
-                    // Remove from all peers
+                    // Add screen share to local view with proper ID
+                    addVideoStream('screen-local', screenStream, "My Screen");
+
+                    // Replace video track in all peer connections with screen track
                     for (let peerId in peers) {
-                        const sender = peers[peerId].getSenders().find(s => s.track === screenTrack);
+                        const sender = peers[peerId].getSenders().find(s => s.track && s.track.kind === 'video');
                         if (sender) {
-                            peers[peerId].removeTrack(sender);
+                            sender.replaceTrack(screenTrack);
                         }
                     }
 
-                    // Remove the screen video element from the grid
-                    const videos = document.querySelectorAll("#video-grid video");
-                    videos.forEach(v => {
-                        if (v.srcObject === screenStream) {
-                            v.parentElement.remove(); // remove wrapper div
-                        }
-                    });
-                };
+                    // When user stops screen share via browser UI, restore camera
+                    screenTrack.onended = () => {
+                        stopScreenShare();
+                    };
 
-            } catch (err) {
-                console.error("Error sharing screen:", err);
+                } catch (err) {
+                    console.error("Error sharing screen:", err);
+                }
             }
         });
+
+        function stopScreenShare() {
+            if (!isScreenSharing) return;
+
+            // Stop all tracks in the screen stream
+            if (currentScreenStream) {
+                currentScreenStream.getTracks().forEach(track => track.stop());
+            }
+
+            // Remove screen share video element
+            removeVideoStream('screen-local');
+
+            // Restore original camera track to all peers
+            const cameraTrack = localStream.getVideoTracks()[0];
+            for (let peerId in peers) {
+                const sender = peers[peerId].getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender && cameraTrack) {
+                    sender.replaceTrack(cameraTrack);
+                }
+            }
+
+            // Reset state
+            isScreenSharing = false;
+            currentScreenStream = null;
+
+            // Reset button appearance
+            document.getElementById('share-screen').style.background = '#764ba2';
+        }
 
         window.addEventListener('beforeunload', () => {
             if (localStream) {
